@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+
+    environment {
+        // Kubernetes 클러스터 접속 정보
+        KUBECONFIG = credentials('k8s_master_config') // Jenkins에서 관리하는 Kubeconfig 파일의 credentialsId
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                script {
+                    // PostgreSQL Helm Chart가 있는 GitHub Repository를 Clone
+                    git url: 'https://github.com/funnyray/postgresql.git', branch: 'main'
+                }
+            }
+        }
+
+        stage('Helm Init') {
+            steps {
+                script {
+                    // Helm 저장소 업데이트
+                    sh 'helm repo add bitnami https://charts.bitnami.com/bitnami'
+                    sh 'helm repo update'
+                }
+            }
+        }
+
+        stage('Deploy PostgreSQL') {
+            steps {
+                script {
+                    // PostgreSQL을 Helm으로 배포
+                    sh """
+                        helm upgrade --install my-postgresql ./postgresql-chart \
+                        --set postgresql.username=dev \
+                        --set postgresql.password=dev123 \
+                        --set postgresql.database=mydb \
+                        --set global.storageClass=standard \
+                        --set persistence.size=10Gi \
+                        --set service.port=5432 \
+                        --kubeconfig $KUBECONFIG
+                    """
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    // PostgreSQL Pod 및 서비스가 정상적으로 배포되었는지 확인
+                    sh "kubectl get pods --kubeconfig $KUBECONFIG"
+                    sh "kubectl get svc --kubeconfig $KUBECONFIG"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'PostgreSQL Helm Chart 배포 성공!'
+        }
+        failure {
+            echo '배포 실패. 로그를 확인하세요.'
+        }
+    }
+}
